@@ -11,7 +11,7 @@ class MiamiDade(scrapy.Spider):
 
 	def start_requests(self):
 		urls = self.load_input()
-		for url in urls[:1]:
+		for url in urls:
 			yield scrapy.Request(url, callback=self.parse)
 
 
