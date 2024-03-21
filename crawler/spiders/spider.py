@@ -1,8 +1,10 @@
+from typing import Dict
 import scrapy
 import pandas as pd
 from urllib.parse import quote
 from scrapy.http import Response
 import json
+
 
 
 class MiamiDade(scrapy.Spider):
@@ -35,8 +37,53 @@ class MiamiDade(scrapy.Spider):
 				"adjusted_area": data.get("PropertyInfo", {}).get("BuildingEffectiveArea"),
 				"market_value": data.get("Taxable", {}).get("TaxableInfos", [{}])[0].get("SchoolTaxableValue"),
 				"assessed_value": data.get("Taxable", {}).get("TaxableInfos", [{}])[0].get("CountyTaxableValue"),
+				"building_information": {
+					"year_built": data.get("Building", {}).get("BuildingInfos", [{}])[0].get("Actual"),
+					"actual_sqft": data.get("Building", {}).get("BuildingInfos", [{}])[0].get("GrossArea"),
+					"living_sqft": data.get("Building", {}).get("BuildingInfos", [{}])[0].get("HeatedArea"),
+					"calc_value": data.get("Building", {}).get("BuildingInfos", [{}])[0].get("DepreciatedValue"),
+				}
 			}
-			return item
+			url = f"https://miamidade.county-taxes.com/public/real_estate/parcels/{data.get('PropertyInfo', {}).get('FolioNumber').replace('-','')}"
+			yield scrapy.Request(url, callback=self.parse_taxes, cb_kwargs={"item": item}, meta={
+                "zyte_api_automap": True
+            })
+
+
+	def parse_taxes(self, response: Response, item: Dict):
+		taxes = []
+		installments_page = response.xpath("//tr[@class='year-footer']")
+		bill_year = None
+
+		for idx, row in enumerate(response.xpath("//table/tbody/tr[not(@class='d-table-row d-md-none')]"), start=1):
+			sub_item = {}
+			
+			if installments_page:
+				if row.xpath("self::node()[not(@class='installment')]"):
+					if row.xpath("./th[@class='year-header']"):
+						bill_year = row.xpath("./th[@class='year-header']/a[1]/text()").get()
+					elif row.xpath("self::node()[@class='year-footer']"):
+						status = row.xpath("./td[@class='label status']/text()").re_first("\w+")
+						sub_item = {
+							"bill": bill_year,
+							"amount_due": row.xpath("./td[@class='label status']/preceding-sibling::td[@class]/text()").get('$0.00').strip(),
+							"amount_paid": row.xpath("./td[@class='label status']/text()").re_first("[\d,\.$]+"),
+							"status": status
+						}
+			else:
+				status = row.xpath("./td[contains(@class, 'status')]/span[@class='label']/text()").get('').strip()
+				sub_item = {
+					"bill": row.xpath("./th/a[1]/text()").get(),
+					"amount_due": row.xpath("./td[@class='balance']/text()").get('').strip(),
+					"amount_paid": row.xpath("./td[contains(@class, 'status')]/span/following-sibling::text()").get('').strip(),
+					"status": status
+				}
+
+			taxes.append(sub_item) if sub_item else None
+			if len(taxes) == 3:
+				break
+		item['property_taxes'] = taxes
+		return item
 
 
 	@staticmethod

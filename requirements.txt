@@ -1,2 +1,4 @@
 scrapy
 pandas
+scrapy_zyte_api
+python-dotenv
