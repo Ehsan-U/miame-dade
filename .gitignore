@@ -3,3 +3,4 @@
 /.vscode
 output.json
 *.pyc
+__pycache__/
